@@ -48,6 +48,30 @@ const eventCards = content.events
   )
   .join("");
 
+const playIcon = `
+  <svg viewBox="0 0 24 24" aria-hidden="true">
+    <path d="M8 5.5v13l10.5-6.5z" />
+  </svg>
+`;
+
+const trailerTabs = content.trailer.videos
+  .map(
+    (video, index) => `
+      <button
+        class="trailer__tab"
+        type="button"
+        role="tab"
+        id="trailer-tab-${index}"
+        aria-selected="${index === 0}"
+        aria-controls="trailer-panel"
+        tabindex="${index === 0 ? 0 : -1}"
+      >${video.label}</button>
+    `,
+  )
+  .join("");
+
+const firstVideo = content.trailer.videos[0];
+
 app.innerHTML = `
   <a class="skip-link" href="#main">К основному контенту</a>
 
@@ -82,6 +106,31 @@ app.innerHTML = `
         </div>
       </div>
       <a class="scroll-cue" href="#directions" aria-label="Прокрутить вниз"><span></span>SCROLL</a>
+    </section>
+
+    <section class="trailer" id="video" aria-labelledby="trailer-title">
+      <h2 class="visually-hidden" id="trailer-title">${content.trailer.title}</h2>
+      <div class="trailer__inner reveal">
+        <div class="trailer__tabs" role="tablist" aria-label="${content.trailer.title}">
+          ${trailerTabs}
+        </div>
+        <div class="trailer__frame" id="trailer-panel" role="tabpanel" aria-labelledby="trailer-tab-0">
+          <video
+            class="trailer__video"
+            src="${firstVideo.src}"
+            poster="${firstVideo.poster || ""}"
+            muted
+            loop
+            playsinline
+            preload="metadata"
+          ></video>
+          <span class="trailer__shade" aria-hidden="true"></span>
+          <button class="trailer__play" type="button">
+            <span class="trailer__play-icon">${playIcon}</span>
+            <span class="trailer__play-label">${firstVideo.cta}</span>
+          </button>
+        </div>
+      </div>
     </section>
 
     <section class="intro section" id="directions">
@@ -282,6 +331,97 @@ const observer = new IntersectionObserver(
 );
 
 document.querySelectorAll(".reveal").forEach((element) => observer.observe(element));
+
+// Окно с видео: без звука играет превью по кругу, по кнопке — ролик со звуком и элементами управления.
+const trailerFrame = document.querySelector(".trailer__frame");
+const trailerVideo = trailerFrame.querySelector(".trailer__video");
+const trailerPlay = trailerFrame.querySelector(".trailer__play");
+const trailerPlayLabel = trailerFrame.querySelector(".trailer__play-label");
+const trailerTabButtons = [...document.querySelectorAll(".trailer__tab")];
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+let trailerInView = false;
+
+const canAutoplayPreview = () =>
+  trailerInView &&
+  !reducedMotion.matches &&
+  !navigator.connection?.saveData &&
+  !trailerFrame.classList.contains("is-engaged");
+
+const startPreview = () => {
+  if (canAutoplayPreview()) {
+    trailerVideo.play().catch(() => {});
+  }
+};
+
+const resetToPreview = () => {
+  trailerFrame.classList.remove("is-engaged");
+  trailerVideo.controls = false;
+  trailerVideo.muted = true;
+  trailerVideo.loop = true;
+};
+
+const selectTrailer = (index) => {
+  const item = content.trailer.videos[index];
+
+  trailerTabButtons.forEach((tab, tabIndex) => {
+    const active = tabIndex === index;
+    tab.setAttribute("aria-selected", String(active));
+    tab.tabIndex = active ? 0 : -1;
+  });
+  trailerFrame.setAttribute("aria-labelledby", trailerTabButtons[index].id);
+  trailerFrame.classList.remove("has-error");
+  trailerPlayLabel.textContent = item.cta;
+
+  resetToPreview();
+  trailerVideo.poster = item.poster || "";
+  trailerVideo.src = item.src;
+  startPreview();
+};
+
+trailerTabButtons.forEach((tab, index) => {
+  tab.addEventListener("click", () => {
+    if (tab.getAttribute("aria-selected") !== "true") selectTrailer(index);
+  });
+
+  tab.addEventListener("keydown", (event) => {
+    const last = trailerTabButtons.length - 1;
+    const keys = { ArrowRight: index === last ? 0 : index + 1, ArrowLeft: index === 0 ? last : index - 1, Home: 0, End: last };
+    if (!(event.key in keys)) return;
+    event.preventDefault();
+    trailerTabButtons[keys[event.key]].focus();
+    selectTrailer(keys[event.key]);
+  });
+});
+
+trailerPlay.addEventListener("click", () => {
+  trailerFrame.classList.add("is-engaged");
+  trailerVideo.loop = false;
+  trailerVideo.muted = false;
+  trailerVideo.controls = true;
+  trailerVideo.currentTime = 0;
+  trailerVideo.play().catch(() => {});
+  trailerVideo.focus();
+});
+
+trailerVideo.addEventListener("ended", () => {
+  resetToPreview();
+  trailerVideo.currentTime = 0;
+  startPreview();
+});
+
+trailerVideo.addEventListener("error", () => trailerFrame.classList.add("has-error"));
+
+new IntersectionObserver(
+  ([entry]) => {
+    trailerInView = entry.isIntersecting;
+    if (trailerInView) {
+      startPreview();
+    } else if (!trailerFrame.classList.contains("is-engaged")) {
+      trailerVideo.pause();
+    }
+  },
+  { threshold: 0.35 },
+).observe(trailerFrame);
 
 document.querySelector(".signup-form").addEventListener("submit", (event) => {
   event.preventDefault();
