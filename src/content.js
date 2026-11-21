@@ -3,7 +3,7 @@
 
 export const siteContent = {
   brand: {
-    name: "FORMA",
+    name: "Валерия",
     descriptor: "студия движения",
   },
   navigation: [
