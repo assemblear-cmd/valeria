@@ -54,7 +54,45 @@ const playIcon = `
   </svg>
 `;
 
-const trailerTabs = content.trailer.videos
+// Принимает ссылку youtu.be, youtube.com/watch?v=, /embed/, /shorts/, /live/ или сам ID ролика.
+const getYouTubeId = (value) => {
+  if (!value) return null;
+  const raw = String(value).trim();
+  const isId = (id) => typeof id === "string" && /^[\w-]{11}$/.test(id);
+  if (isId(raw)) return raw;
+
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.replace(/^(www|m)\./, "");
+    let id = null;
+    if (host === "youtu.be") {
+      id = url.pathname.split("/")[1];
+    } else if (host === "youtube.com" || host === "youtube-nocookie.com") {
+      id = url.searchParams.get("v") || url.pathname.match(/^\/(?:embed|shorts|live)\/([^/]+)/)?.[1];
+    }
+    return isId(id) ? id : null;
+  } catch {
+    return null;
+  }
+};
+
+const trailerVideos = content.trailer.videos.map((video) => {
+  const youtubeId = getYouTubeId(video.youtube);
+  if (video.youtube && !youtubeId) {
+    console.warn(`Не удалось распознать ссылку на YouTube: ${video.youtube}`);
+  }
+  if (!youtubeId) return video;
+
+  const thumbnail = (size) => `https://i.ytimg.com/vi/${youtubeId}/${size}.jpg`;
+  return {
+    ...video,
+    youtubeId,
+    poster: video.poster || thumbnail("maxresdefault"),
+    posterFallback: thumbnail("hqdefault"),
+  };
+});
+
+const trailerTabs = trailerVideos
   .map(
     (video, index) => `
       <button
@@ -69,8 +107,6 @@ const trailerTabs = content.trailer.videos
     `,
   )
   .join("");
-
-const firstVideo = content.trailer.videos[0];
 
 app.innerHTML = `
   <a class="skip-link" href="#main">К основному контенту</a>
@@ -115,19 +151,12 @@ app.innerHTML = `
           ${trailerTabs}
         </div>
         <div class="trailer__frame" id="trailer-panel" role="tabpanel" aria-labelledby="trailer-tab-0">
-          <video
-            class="trailer__video"
-            src="${firstVideo.src}"
-            poster="${firstVideo.poster || ""}"
-            muted
-            loop
-            playsinline
-            preload="metadata"
-          ></video>
+          <video class="trailer__video" muted loop playsinline preload="metadata"></video>
+          <img class="trailer__poster" alt="" decoding="async" />
           <span class="trailer__shade" aria-hidden="true"></span>
           <button class="trailer__play" type="button">
             <span class="trailer__play-icon">${playIcon}</span>
-            <span class="trailer__play-label">${firstVideo.cta}</span>
+            <span class="trailer__play-label">${trailerVideos[0].cta}</span>
           </button>
         </div>
       </div>
@@ -332,17 +361,22 @@ const observer = new IntersectionObserver(
 
 document.querySelectorAll(".reveal").forEach((element) => observer.observe(element));
 
-// Окно с видео: без звука играет превью по кругу, по кнопке — ролик со звуком и элементами управления.
+// Окно с видео. Свой файл без звука играет превью по кругу, по кнопке — ролик со звуком и элементами управления.
+// Ролик YouTube показывает обложку, а плеер встраивается только по кнопке: до клика к YouTube не уходит ни одного запроса, кроме обложки.
 const trailerFrame = document.querySelector(".trailer__frame");
 const trailerVideo = trailerFrame.querySelector(".trailer__video");
+const trailerPoster = trailerFrame.querySelector(".trailer__poster");
 const trailerPlay = trailerFrame.querySelector(".trailer__play");
 const trailerPlayLabel = trailerFrame.querySelector(".trailer__play-label");
 const trailerTabButtons = [...document.querySelectorAll(".trailer__tab")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let trailerInView = false;
+let activeTrailer = trailerVideos[0];
+let trailerEmbed = null;
 
 const canAutoplayPreview = () =>
   trailerInView &&
+  !activeTrailer.youtubeId &&
   !reducedMotion.matches &&
   !navigator.connection?.saveData &&
   !trailerFrame.classList.contains("is-engaged");
@@ -360,8 +394,28 @@ const resetToPreview = () => {
   trailerVideo.loop = true;
 };
 
+const closeYouTube = () => {
+  trailerEmbed?.remove();
+  trailerEmbed = null;
+};
+
+const openYouTube = (item) => {
+  const params = new URLSearchParams({ autoplay: "1", rel: "0", playsinline: "1" });
+  trailerEmbed = document.createElement("iframe");
+  trailerEmbed.className = "trailer__embed";
+  trailerEmbed.src = `https://www.youtube-nocookie.com/embed/${item.youtubeId}?${params}`;
+  trailerEmbed.title = `${content.trailer.title}: ${item.label}`;
+  trailerEmbed.allow =
+    "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
+  trailerEmbed.allowFullscreen = true;
+  trailerEmbed.referrerPolicy = "strict-origin-when-cross-origin";
+  trailerFrame.append(trailerEmbed);
+  trailerEmbed.focus();
+};
+
 const selectTrailer = (index) => {
-  const item = content.trailer.videos[index];
+  const item = trailerVideos[index];
+  activeTrailer = item;
 
   trailerTabButtons.forEach((tab, tabIndex) => {
     const active = tabIndex === index;
@@ -370,13 +424,37 @@ const selectTrailer = (index) => {
   });
   trailerFrame.setAttribute("aria-labelledby", trailerTabButtons[index].id);
   trailerFrame.classList.remove("has-error");
+  trailerFrame.classList.toggle("is-youtube", Boolean(item.youtubeId));
   trailerPlayLabel.textContent = item.cta;
 
+  closeYouTube();
   resetToPreview();
+
+  if (item.youtubeId) {
+    trailerVideo.pause();
+    trailerVideo.removeAttribute("src");
+    trailerVideo.removeAttribute("poster");
+    trailerVideo.load();
+    trailerPoster.src = item.poster;
+    return;
+  }
+
+  trailerPoster.removeAttribute("src");
   trailerVideo.poster = item.poster || "";
   trailerVideo.src = item.src;
   startPreview();
 };
+
+// У части роликов нет обложки в высоком разрешении: YouTube тогда отдаёт заглушку 120×90 — берём обложку поменьше.
+const usePosterFallback = () => {
+  const fallback = activeTrailer.posterFallback;
+  if (fallback && trailerPoster.getAttribute("src") !== fallback) trailerPoster.src = fallback;
+};
+
+trailerPoster.addEventListener("load", () => {
+  if (trailerPoster.naturalWidth <= 120) usePosterFallback();
+});
+trailerPoster.addEventListener("error", usePosterFallback);
 
 trailerTabButtons.forEach((tab, index) => {
   tab.addEventListener("click", () => {
@@ -395,6 +473,11 @@ trailerTabButtons.forEach((tab, index) => {
 
 trailerPlay.addEventListener("click", () => {
   trailerFrame.classList.add("is-engaged");
+  if (activeTrailer.youtubeId) {
+    openYouTube(activeTrailer);
+    return;
+  }
+
   trailerVideo.loop = false;
   trailerVideo.muted = false;
   trailerVideo.controls = true;
@@ -409,7 +492,11 @@ trailerVideo.addEventListener("ended", () => {
   startPreview();
 });
 
-trailerVideo.addEventListener("error", () => trailerFrame.classList.add("has-error"));
+trailerVideo.addEventListener("error", () => {
+  if (!activeTrailer.youtubeId) trailerFrame.classList.add("has-error");
+});
+
+selectTrailer(0);
 
 new IntersectionObserver(
   ([entry]) => {

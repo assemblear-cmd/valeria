@@ -387,7 +387,8 @@ a {
 
 .trailer__tab:focus-visible,
 .trailer__play:focus-visible,
-.trailer__video:focus-visible {
+.trailer__video:focus-visible,
+.trailer__embed:focus-visible {
   outline: 2px solid white;
   outline-offset: 4px;
 }
@@ -401,6 +402,8 @@ a {
 }
 
 .trailer__video,
+.trailer__poster,
+.trailer__embed,
 .trailer__shade {
   position: absolute;
   inset: 0;
@@ -408,9 +411,21 @@ a {
   height: 100%;
 }
 
-.trailer__video {
+.trailer__video,
+.trailer__poster {
   display: block;
   object-fit: cover;
+  background: #000;
+}
+
+.trailer__frame.is-youtube .trailer__video,
+.trailer__frame:not(.is-youtube) .trailer__poster {
+  display: none;
+}
+
+.trailer__embed {
+  z-index: 2;
+  border: 0;
   background: #000;
 }
 
