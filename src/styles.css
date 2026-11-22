@@ -388,7 +388,7 @@ a {
 .trailer__tab:focus-visible,
 .trailer__play:focus-visible,
 .trailer__video:focus-visible,
-.trailer__embed:focus-visible {
+.trailer__embed iframe:focus-visible {
   outline: 2px solid white;
   outline-offset: 4px;
 }
@@ -425,8 +425,70 @@ a {
 
 .trailer__embed {
   z-index: 2;
+}
+
+.trailer__embed iframe {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   border: 0;
-  background: #000;
+}
+
+.trailer__fallback {
+  position: absolute;
+  z-index: 3;
+  left: clamp(16px, 2.6vw, 44px);
+  right: clamp(16px, 2.6vw, 44px);
+  bottom: clamp(16px, 2.6vw, 44px);
+  max-width: 460px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  background: rgba(10, 10, 10, 0.78);
+  backdrop-filter: blur(14px);
+  color: white;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s, visibility 0.3s;
+}
+
+.trailer__frame.has-fallback .trailer__fallback {
+  opacity: 1;
+  visibility: visible;
+}
+
+.trailer__fallback-text {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.trailer__fallback-link {
+  min-height: 44px;
+  padding: 0 20px;
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  background: var(--blue);
+  color: white;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.trailer__fallback-link:hover {
+  background: white;
+  color: var(--ink);
+}
+
+.trailer__fallback-link:focus-visible {
+  outline: 2px solid white;
+  outline-offset: 4px;
 }
 
 .trailer__shade {

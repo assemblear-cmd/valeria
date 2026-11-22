@@ -158,6 +158,10 @@ app.innerHTML = `
             <span class="trailer__play-icon">${playIcon}</span>
             <span class="trailer__play-label">${trailerVideos[0].cta}</span>
           </button>
+          <div class="trailer__fallback" role="status" aria-live="polite">
+            <p class="trailer__fallback-text"></p>
+            <a class="trailer__fallback-link" href="https://www.youtube.com/" target="_blank" rel="noopener noreferrer">Смотреть на YouTube ↗</a>
+          </div>
         </div>
       </div>
     </section>
@@ -371,8 +375,14 @@ const trailerPlayLabel = trailerFrame.querySelector(".trailer__play-label");
 const trailerTabButtons = [...document.querySelectorAll(".trailer__tab")];
 const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
 let trailerInView = false;
+const trailerFallbackText = trailerFrame.querySelector(".trailer__fallback-text");
+const trailerFallbackLink = trailerFrame.querySelector(".trailer__fallback-link");
 let activeTrailer = trailerVideos[0];
 let trailerEmbed = null;
+let youTubePlayer = null;
+let youTubeApi = null;
+let youTubeSession = 0;
+let youTubeTimer = 0;
 
 const canAutoplayPreview = () =>
   trailerInView &&
@@ -394,23 +404,94 @@ const resetToPreview = () => {
   trailerVideo.loop = true;
 };
 
-const closeYouTube = () => {
-  trailerEmbed?.remove();
-  trailerEmbed = null;
+// Официальный API плеера YouTube грузится только при первом нажатии на кнопку.
+const loadYouTubeApi = () => {
+  youTubeApi ??= new Promise((resolve, reject) => {
+    if (window.YT?.Player) {
+      resolve(window.YT);
+      return;
+    }
+    const previousReady = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previousReady?.();
+      resolve(window.YT);
+    };
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    script.addEventListener("error", () => {
+      youTubeApi = null;
+      script.remove();
+      reject(new Error("YouTube iframe API is unavailable"));
+    });
+    document.head.append(script);
+  });
+  return youTubeApi;
 };
 
-const openYouTube = (item) => {
-  const params = new URLSearchParams({ autoplay: "1", rel: "0", playsinline: "1" });
-  trailerEmbed = document.createElement("iframe");
+const showYouTubeFallback = (message) => {
+  trailerFallbackText.textContent = message;
+  trailerFrame.classList.add("has-fallback");
+};
+
+const closeYouTube = () => {
+  youTubeSession += 1;
+  clearTimeout(youTubeTimer);
+  youTubePlayer?.destroy();
+  youTubePlayer = null;
+  trailerEmbed?.remove();
+  trailerEmbed = null;
+  trailerFrame.classList.remove("has-fallback");
+};
+
+// Если плеер не запустился (YouTube недоступен в сети посетителя или ролик нельзя встраивать),
+// вместо пустого окна показываем сообщение и ссылку на ролик на YouTube.
+const openYouTube = async (item) => {
+  closeYouTube();
+  const session = youTubeSession;
+  trailerFallbackLink.href = `https://www.youtube.com/watch?v=${item.youtubeId}`;
+
+  const mount = document.createElement("div");
+  trailerEmbed = document.createElement("div");
   trailerEmbed.className = "trailer__embed";
-  trailerEmbed.src = `https://www.youtube-nocookie.com/embed/${item.youtubeId}?${params}`;
-  trailerEmbed.title = `${content.trailer.title}: ${item.label}`;
-  trailerEmbed.allow =
-    "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen";
-  trailerEmbed.allowFullscreen = true;
-  trailerEmbed.referrerPolicy = "strict-origin-when-cross-origin";
+  trailerEmbed.append(mount);
   trailerFrame.append(trailerEmbed);
-  trailerEmbed.focus();
+
+  youTubeTimer = setTimeout(
+    () => showYouTubeFallback("Видео долго загружается. Можно посмотреть его прямо на YouTube."),
+    12000,
+  );
+
+  try {
+    const YT = await loadYouTubeApi();
+    if (session !== youTubeSession) return;
+
+    youTubePlayer = new YT.Player(mount, {
+      videoId: item.youtubeId,
+      playerVars: { autoplay: 1, rel: 0, playsinline: 1 },
+      events: {
+        onReady: (event) => {
+          if (session !== youTubeSession) return;
+          clearTimeout(youTubeTimer);
+          trailerFrame.classList.remove("has-fallback");
+          const iframe = event.target.getIframe();
+          iframe.title = `${content.trailer.title}: ${item.label}`;
+          event.target.playVideo();
+          iframe.focus();
+        },
+        onError: (event) => {
+          if (session !== youTubeSession) return;
+          clearTimeout(youTubeTimer);
+          console.warn("YouTube player error", event.data);
+          showYouTubeFallback("Это видео не запускается на сайте. Посмотрите его на YouTube.");
+        },
+      },
+    });
+  } catch {
+    if (session !== youTubeSession) return;
+    clearTimeout(youTubeTimer);
+    showYouTubeFallback("Не удалось подключиться к YouTube. Попробуйте открыть видео там.");
+  }
 };
 
 const selectTrailer = (index) => {
